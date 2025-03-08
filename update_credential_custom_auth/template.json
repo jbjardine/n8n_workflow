@@ -1,0 +1,560 @@
+{
+  "name": "n8n_update_credential_custom_auth",
+  "nodes": [
+    {
+      "parameters": {
+        "jsCode": "function generateUUID() {\n  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {\n    const r = Math.random() * 16 | 0;\n    const v = c === 'x' ? r : (r & 0x3 | 0x8);\n    return v.toString(16);\n  });\n}\n\nreturn $input.all().map(item => ({\n  json: { random_UUID: generateUUID() }\n}));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        120,
+        -300
+      ],
+      "id": "618f5a83-2486-4beb-81a5-e56bd1b05b51",
+      "name": "random_UUID_v4"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "21d5ea66-b9d0-47f1-9c39-933ca5c8b95f",
+              "name": "n8n_URL",
+              "value": "https://****.***/",
+              "type": "string"
+            },
+            {
+              "id": "c21573a5-5732-4b1d-aa03-cba7264b0f0f",
+              "name": "user_email",
+              "value": "****e@****.***",
+              "type": "string"
+            },
+            {
+              "id": "83ed0f8d-7da7-4049-b095-0ea4ab195e0f",
+              "name": "user_password",
+              "value": "*****",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -260,
+        -520
+      ],
+      "id": "06bb4699-e3ff-46d8-b73b-dac8e614451b",
+      "name": "Login credentials",
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "jsCode": "function cleanURL(url) {\n  // Ajoute un protocole si absent (http ou https)\n  if (!/^(https?:\\/\\/)/i.test(url)) {\n    url = \"http://\" + url;\n  }\n  // Utilise une regex pour extraire le nom de domaine (hostname)\n  const match = url.match(/^(?:https?:\\/\\/)?([^\\/]+)/i);\n  let hostname = match ? match[1] : \"\";\n  // Enlève le \"www.\" au début s'il est présent\n  hostname = hostname.replace(/^www\\./i, \"\");\n  return hostname;\n}\n\nconst rawUrl = $input.first().json.n8n_URL;\nreturn { json: { clean_URL: cleanURL(rawUrl) } };"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        100,
+        -580
+      ],
+      "id": "ef3bdcf3-8fd6-472a-8917-ea10d91d57bf",
+      "name": "clean_URL"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://{{ $json.clean_URL }}/rest/login",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "browser-id",
+              "value": "={{ $json.random_UUID }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "emailOrLdapLoginId",
+              "value": "={{ $json.user_email }}"
+            },
+            {
+              "name": "password",
+              "value": "={{ $json.user_password }}"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        660,
+        -400
+      ],
+      "id": "c0a6e3b9-6b19-4cbe-a58d-34bb62e4e819",
+      "name": "login_n8n",
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "mode": "combineBySql",
+        "numberInputs": 3,
+        "query": "SELECT input1.*, input2.user_email, input2.user_password, input3.*\nFROM input1, (SELECT user_email, user_password FROM input2) AS input2, input3;"
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [
+        420,
+        -400
+      ],
+      "id": "054d4043-d677-469f-a5e2-98b427ecf042",
+      "name": "merge_credentials",
+      "executeOnce": false
+    },
+    {
+      "parameters": {
+        "errorMessage": "={{ (() => {\n  const raw = $json.error.message;\n  let jsonPart = raw.replace(/^\\d+\\s*-\\s*/, '');\n  if (jsonPart.startsWith('\"') && jsonPart.endsWith('\"')) {\n    jsonPart = jsonPart.slice(1, -1);\n  }\n  jsonPart = jsonPart.replace(/\\\\\"/g, '\"');\n  const data = JSON.parse(jsonPart);\n  return `Error code: ${data.code} ; Message: ${data.message}`;\n})() }}"
+      },
+      "type": "n8n-nodes-base.stopAndError",
+      "typeVersion": 1,
+      "position": [
+        920,
+        -300
+      ],
+      "id": "5419e5dc-0b71-4ccf-9968-67c606bb2db4",
+      "name": "error_login"
+    },
+    {
+      "parameters": {
+        "url": "=https://{{ $('merge_credentials').item.json.clean_URL }}/rest/credentials",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "includeScopes",
+              "value": "true"
+            },
+            {
+              "name": "includeData",
+              "value": "true"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "browser-id",
+              "value": "={{ $('merge_credentials').item.json.random_UUID }}"
+            },
+            {
+              "name": "cookie",
+              "value": "={{ $json.headers['set-cookie'][0] }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        980,
+        -540
+      ],
+      "id": "58b5b85a-cb98-4df1-a269-06dfa9bcbce8",
+      "name": "GET_list_credentials"
+    },
+    {
+      "parameters": {
+        "jsCode": "const inputItems = $input.all();\nlet newItems = [];\n\nfor (const item of inputItems) {\n  if (Array.isArray(item.json.data)) {\n    for (const credential of item.json.data) {\n      newItems.push({ json: { name: credential.name, id: credential.id, original_data: credential.data, type: credential.type } });\n    }\n  }\n}\n\nreturn newItems;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1200,
+        -540
+      ],
+      "id": "cc80e95e-1e82-4684-bffd-6483ddecc54b",
+      "name": "extract_list_credentials"
+    },
+    {
+      "parameters": {
+        "errorMessage": "=No matching credential names found in n8n!"
+      },
+      "type": "n8n-nodes-base.stopAndError",
+      "typeVersion": 1,
+      "position": [
+        1960,
+        -420
+      ],
+      "id": "1a202b57-94fc-4315-a295-08f72c03c9c1",
+      "name": "error_match_credentials"
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "=https://{{ $('merge_credentials').first().json.clean_URL }}/rest/credentials/{{ $json.id }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "cookie",
+              "value": "={{ $('login_n8n').first().json.headers['set-cookie'][0] }}"
+            },
+            {
+              "name": "content-type",
+              "value": "application/json"
+            },
+            {
+              "name": "accept",
+              "value": " application/json, text/plain, */*"
+            },
+            {
+              "name": "accept-encoding",
+              "value": " gzip, deflate, br, zstd"
+            },
+            {
+              "name": "accept-language",
+              "value": "fr-FR,fr;q=0.9"
+            },
+            {
+              "name": "browser-id",
+              "value": "={{ $('merge_credentials').first().json.random_UUID }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"id\": \"{{ $json.id }}\",\n  \"name\": \"{{ $json.name }}\",\n  \"type\": \"httpCustomAuth\",\n  \"data\": {\n    \"json\": {{ JSON.stringify($json.data, null, 2) }}\n  }\n}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2200,
+        -720
+      ],
+      "id": "1190d8ec-4158-4c5b-ae3c-6b94cfcfd89f",
+      "name": "PATCH_credentials"
+    },
+    {
+      "parameters": {
+        "jsCode": "const webhooks = $('call_workflow').all();\nconst items = $input.all();\n\nconst result = [];\n\nfor (const i of items) {\n  const item = i.json;\n  const match = webhooks.find(wh => wh.json.name_credential === item.name);\n  if (match) {\n    item.value_credential = match.json.value_credential;\n    if (item.original_data && typeof item.original_data.json === 'string') {\n      // @ts-ignore\n      item.original_data = item.original_data.json;\n    }\n    result.push({ json: item });\n  }\n}\n\nif (result.length === 0) {\n  throw new Error();\n}\n\nreturn result;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1700,
+        -540
+      ],
+      "id": "a3d04e0a-c665-4b5e-9b20-80e13e369e39",
+      "name": "filter_credentials",
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst result = [];\n\nfor (const i of items) {\n  const item = i.json;\n\n  if (typeof item.original_data === 'string') {\n    const parsed = JSON.parse(item.original_data);\n\n    if (parsed?.headers?.authorization) {\n      const authValue = parsed.headers.authorization;\n      const firstSpaceIndex = authValue.indexOf(' ');\n      if (firstSpaceIndex !== -1) {\n        const prefix = authValue.substring(0, firstSpaceIndex + 1);\n        parsed.headers.authorization = prefix + item.value_credential;\n      } else {\n        parsed.headers.authorization = '';\n      }\n    }\n    \n    const { original_data, ...newItem } = item;\n    newItem.update_data = parsed;\n    \n    result.push({ \n      json: { \n        id: newItem.id, \n        name: newItem.name, \n        type: newItem.type, \n        data:  JSON.stringify(newItem.update_data, null, 2)\n      } \n    });\n    \n  } else {\n    throw new Error();\n  }\n}\n\nreturn result;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1920,
+        -640
+      ],
+      "id": "db10a870-a783-4202-842d-acfc206fd518",
+      "name": "update_token",
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "92d74414-20d3-470b-ac6d-2ae03b901fc7",
+              "leftValue": "={{ $json.type }}",
+              "rightValue": "httpCustomAuth",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2.2,
+      "position": [
+        1440,
+        -540
+      ],
+      "id": "b07fb4d0-ccfb-4894-81cd-b34d917ce57b",
+      "name": "filter_httpCustomAuth"
+    },
+    {
+      "parameters": {
+        "errorMessage": "=Error updating the token."
+      },
+      "type": "n8n-nodes-base.stopAndError",
+      "typeVersion": 1,
+      "position": [
+        2180,
+        -540
+      ],
+      "id": "fabcd80f-527c-44c1-a370-11593667059b",
+      "name": "error_update_token"
+    },
+    {
+      "parameters": {
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "name_credential"
+            },
+            {
+              "name": "value_credential"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -500,
+        -520
+      ],
+      "id": "250a92d3-6ec9-4fd0-a89d-17b2549e00c8",
+      "name": "call_workflow"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        2420,
+        -720
+      ],
+      "id": "1bdbe3ee-54be-4862-882d-c40d92e42474",
+      "name": "return_nothing"
+    },
+    {
+      "parameters": {
+        "content": "## n8n Login Credentials Workflow\n\nThis sub-workflow is specifically designed to update your n8n Custom Auth credentials easily.\n\n### Configuration:\n\nSet these parameters directly in the **Login credentials** node:\n- **n8n URL**\n- **n8n email**\n- **n8n password**\n\n### How to use:\n\nSimply call this workflow with the following input parameters:\n- **`name_credential`**: The name/title of your n8n Custom Auth credential.\n- **`value_credential`**: Your new authentication token (**without** the `Bearer` prefix—just the token itself).\n\n\nThe workflow automatically handles token formatting and updates seamlessly.\n\nYou can call this workflow multiple times to update as many credentials as needed.\n\n*Created by jbjardine*",
+        "height": 540,
+        "width": 740,
+        "color": 4
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -560,
+        -1240
+      ],
+      "id": "33da5959-577a-4699-ae69-763ff1a5b9d9",
+      "name": "Sticky Note"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "random_UUID_v4": {
+      "main": [
+        [
+          {
+            "node": "merge_credentials",
+            "type": "main",
+            "index": 2
+          }
+        ]
+      ]
+    },
+    "Login credentials": {
+      "main": [
+        [
+          {
+            "node": "clean_URL",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "merge_credentials",
+            "type": "main",
+            "index": 1
+          },
+          {
+            "node": "random_UUID_v4",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "clean_URL": {
+      "main": [
+        [
+          {
+            "node": "merge_credentials",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "login_n8n": {
+      "main": [
+        [
+          {
+            "node": "GET_list_credentials",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "error_login",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "merge_credentials": {
+      "main": [
+        [
+          {
+            "node": "login_n8n",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GET_list_credentials": {
+      "main": [
+        [
+          {
+            "node": "extract_list_credentials",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "extract_list_credentials": {
+      "main": [
+        [
+          {
+            "node": "filter_httpCustomAuth",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "filter_credentials": {
+      "main": [
+        [
+          {
+            "node": "update_token",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "error_match_credentials",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "update_token": {
+      "main": [
+        [
+          {
+            "node": "PATCH_credentials",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "error_update_token",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "filter_httpCustomAuth": {
+      "main": [
+        [
+          {
+            "node": "filter_credentials",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PATCH_credentials": {
+      "main": [
+        [
+          {
+            "node": "return_nothing",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "call_workflow": {
+      "main": [
+        [
+          {
+            "node": "Login credentials",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "f1b5079c-1d16-414b-9a18-9274cccfa0ca",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "df5f7355b2508580f7ec10975aef223273cb4eaf4816969e60a61253a47025fc"
+  },
+  "id": "WKyodY2fLBuCClTV",
+  "tags": []
+}
